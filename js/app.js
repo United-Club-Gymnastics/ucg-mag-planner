@@ -9,13 +9,14 @@ import {
   LEVEL_IDS,
   MAX_PER_EG,
   MAX_ROUTINE,
+  SR_MAX_STATIC,
   MIN_SKILLS,
   ROMAN,
   eventOptions,
   fmt,
   scoreAthlete,
-  vaultStickValue,
 } from './scoring.js';
+import { findSkill, searchSkills } from './skill-search.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -237,6 +238,150 @@ function vaultOptions(current, level) {
 
 const ICON_GRIP = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.7"/><circle cx="15" cy="6" r="1.7"/><circle cx="9" cy="12" r="1.7"/><circle cx="15" cy="12" r="1.7"/><circle cx="9" cy="18" r="1.7"/><circle cx="15" cy="18" r="1.7"/></svg>`;
 const ICON_X = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+const ICON_CHEVRON = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+
+// ---- Skill picker ------------------------------------------------------------
+// Typing in a skill name (or clicking its arrow) opens a list of UCG and WG
+// skills for the apparatus; picking one fills in the name, difficulty and EG.
+// Anything else typed is kept as a custom skill with a manual difficulty / EG.
+// The list lives on <body> so the routine table's scrolling doesn't clip it.
+
+const picker = { el: null, input: null, items: [], active: -1 };
+
+function pickerEl() {
+  if (!picker.el) {
+    const el = document.createElement('div');
+    el.id = 'skill-pop';
+    el.className = 'skill-pop';
+    el.setAttribute('role', 'listbox');
+    el.setAttribute('aria-label', 'Skills');
+    el.hidden = true;
+    el.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
+    el.addEventListener('click', (e) => {
+      const o = e.target.closest('[data-skill]');
+      if (o) pickSkill(Number(o.dataset.skill));
+    });
+    document.body.appendChild(el);
+    addEventListener('resize', placePicker);
+    addEventListener('scroll', placePicker, true);
+    picker.el = el;
+  }
+  return picker.el;
+}
+
+function openPicker(input, query) {
+  const el = pickerEl();
+  picker.input = input;
+  picker.items = searchSkills(input.dataset.event, query);
+  picker.active = query && picker.items.length ? 0 : -1;
+  input.setAttribute('aria-expanded', 'true');
+  renderPicker(query);
+  el.hidden = false;
+  el.scrollTop = 0;
+  placePicker();
+}
+
+function closePicker() {
+  if (!picker.input) return;
+  picker.el.hidden = true;
+  picker.input.setAttribute('aria-expanded', 'false');
+  picker.input.removeAttribute('aria-activedescendant');
+  picker.input = null;
+}
+
+function renderPicker(query) {
+  const groups = APPARATUS[picker.input.dataset.event].groups;
+  const html = [];
+  let lastEg;
+  picker.items.forEach((s, i) => {
+    if (!query && s.eg !== lastEg) {
+      html.push(
+        `<div class="pop-head" role="presentation">${s.eg ? `EG ${ROMAN[s.eg]} · ${esc(groups[s.eg])}` : 'No element group (no EG bonus)'}</div>`
+      );
+      lastEg = s.eg;
+    }
+    html.push(`
+      <div class="pop-opt${i === picker.active ? ' active' : ''}" role="option" id="pop-opt-${i}" data-skill="${i}"
+        aria-selected="${i === picker.active}"${s.note ? ` title="Note: ${esc(s.note)}"` : ''}>
+        <span class="src-badge ${s.src.toLowerCase()}">${s.src}</span>
+        <span class="pop-name">${esc(s.name)}${s.eponym ? ` <span class="pop-eponym">(${esc(s.eponym)})</span>` : ''}</span>
+        <span class="pop-meta">${esc(s.value)}${s.eg ? ` · EG ${ROMAN[s.eg]}` : ''}</span>
+      </div>`);
+  });
+  html.push(
+    picker.items.length
+      ? `<div class="pop-foot"><span class="src-badge ucg">UCG</span> UCG Code of Points <span class="src-badge wg">WG</span> World Gymnastics Code of Points. Not listed? Type your own name and set the difficulty and EG.</div>`
+      : `<div class="pop-empty">No listed skills match. That's fine: keep your own name and choose the difficulty and element group yourself.</div>`
+  );
+  picker.el.innerHTML = html.join('');
+  setActive(picker.active);
+}
+
+function setActive(i) {
+  picker.active = i;
+  $$('.pop-opt', picker.el).forEach((o) => {
+    const on = Number(o.dataset.skill) === i;
+    o.classList.toggle('active', on);
+    o.setAttribute('aria-selected', on);
+    if (on) o.scrollIntoView({ block: 'nearest' });
+  });
+  if (i >= 0) picker.input.setAttribute('aria-activedescendant', `pop-opt-${i}`);
+  else picker.input.removeAttribute('aria-activedescendant');
+}
+
+function placePicker() {
+  if (!picker.input) return;
+  const r = picker.input.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight) return closePicker();
+  const w = Math.min(Math.max(r.width + 60, 440), innerWidth - 16);
+  const left = Math.min(Math.max(8, r.left), innerWidth - w - 8);
+  const below = innerHeight - r.bottom - 12;
+  const above = r.top - 12;
+  const up = below < 240 && above > below;
+  Object.assign(picker.el.style, {
+    left: `${left}px`,
+    width: `${w}px`,
+    maxHeight: `${Math.min(380, up ? above : below)}px`,
+    top: up ? '' : `${r.bottom + 4}px`,
+    bottom: up ? `${innerHeight - r.top + 4}px` : '',
+  });
+}
+
+function pickSkill(i) {
+  const s = picker.items[i];
+  const input = picker.input;
+  if (!s || !input) return;
+  const event = input.dataset.event;
+  const idx = Number(input.dataset.idx);
+  Object.assign(selected().routines[event][idx], {
+    name: s.label,
+    letter: s.value,
+    eg: s.eg ? String(s.eg) : '',
+    skillId: s.id,
+  });
+  closePicker();
+  renderRoutine(event, { row: idx, part: 'name' });
+  scheduleSave();
+}
+
+function onPickerKey(ev) {
+  const input = ev.target;
+  const open = picker.input === input;
+  const n = picker.items.length;
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    if (!open) return openPicker(input, '');
+    if (!n) return;
+    const d = ev.key === 'ArrowDown' ? 1 : -1;
+    setActive(picker.active < 0 ? (d > 0 ? 0 : n - 1) : (picker.active + d + n) % n);
+  } else if (ev.key === 'Enter' && open && picker.active >= 0) {
+    ev.preventDefault();
+    pickSkill(picker.active);
+  } else if (ev.key === 'Escape' && open) {
+    ev.preventDefault();
+    closePicker();
+  } else if (ev.key === 'Tab') closePicker();
+}
 
 function skillRow(event, i, s) {
   const groups = APPARATUS[event].groups;
@@ -249,8 +394,13 @@ function skillRow(event, i, s) {
           aria-label="Move ${label}. Drag, or use the up and down arrow keys." title="Drag to reorder">${ICON_GRIP}</button>
         <span class="num">${i + 1}</span>
       </span>
-      <input class="col-name" type="text" placeholder="Skill name" aria-label="${label} name"
-        ${data} data-field="name" value="${esc(s.name)}" />
+      <span class="col-name skill-combo">
+        <input class="skill-input" type="text" placeholder="Search or type a skill" aria-label="${label} name"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="skill-pop" autocomplete="off"
+          ${data} data-field="name" value="${esc(s.name)}" />
+        <span class="src-badge" data-calc="src"></span>
+        <button type="button" class="combo-toggle" data-combo="${event}" data-idx="${i}" tabindex="-1" aria-label="Show ${label} skill list">${ICON_CHEVRON}</button>
+      </span>
       <select class="col-letter" aria-label="${label} difficulty" ${data} data-field="letter">
         <option value="">–</option>
         ${LETTERS.map((l) => `<option${l === s.letter ? ' selected' : ''}>${l}</option>`).join('')}
@@ -286,12 +436,13 @@ function routineRows(event, athlete) {
 // focus something in it: { row, part: 'name' | 'handle' } or 'add'.
 function renderRoutine(event, focus) {
   const a = selected();
+  closePicker();
   $(`[data-routine="${event}"]`).innerHTML = routineRows(event, a);
   updateComputed();
   if (focus === 'add') $(`[data-add-skill="${event}"]`)?.focus();
   else if (focus) {
     const row = $(`[data-routine="${event}"] [data-row="${focus.row}"]`);
-    $(focus.part === 'handle' ? '.drag-handle' : '.col-name', row)?.focus();
+    $(focus.part === 'handle' ? '.drag-handle' : '.skill-input', row)?.focus();
   }
 }
 
@@ -306,6 +457,16 @@ function moveSkill(event, from, to, focusPart) {
 
 function onEditorClick(ev) {
   const a = selected();
+  const toggle = ev.target.closest('[data-combo]');
+  if (toggle) {
+    const input = $('.skill-input', toggle.closest('.skill-combo'));
+    if (picker.input === input) closePicker();
+    else {
+      input.focus();
+      openPicker(input, '');
+    }
+    return;
+  }
   const add = ev.target.closest('[data-add-skill]');
   if (add) {
     const e = add.dataset.addSkill;
@@ -329,6 +490,7 @@ function onEditorClick(ev) {
 }
 
 function onEditorKey(ev) {
+  if (ev.target.classList.contains('skill-input')) return onPickerKey(ev);
   const h = ev.target.closest('.drag-handle');
   if (!h || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
   ev.preventDefault();
@@ -401,7 +563,7 @@ function optionControl(event, o, athlete) {
   } else {
     control = `<input type="checkbox" ${data}${v ? ' checked' : ''} />`;
   }
-  const leading = o.kind === 'check' || o.kind === 'stick';
+  const leading = o.kind === 'check';
   return `
     <label class="event-bonus${o.deduction ? ' requirement' : ''}" data-option-row="${o.id}">
       ${leading ? control : ''}
@@ -455,12 +617,6 @@ function eventCard(event, athlete) {
 
 function vaultCard(athlete) {
   const level = levelOf(athlete);
-  const stickHelp =
-    level === 'dev'
-      ? '+0.1'
-      : level === 'int'
-        ? '+0.1 non-flipping vault, +0.2 flipping vault'
-        : '+0.2 for a flipping vault (no bonus for non-flipping vaults)';
   return `
     <article class="card vault-card" id="panel-vt" data-panel="vt" role="tabpanel" aria-labelledby="tab-vt">
       <header class="card-head">
@@ -472,11 +628,6 @@ function vaultCard(athlete) {
           <select id="f-vault">${vaultOptions(athlete.vault, level)}</select></label>
         <dl class="vault-info" id="vault-info"></dl>
       </div>
-      <label class="event-bonus">
-        <input type="checkbox" data-option="vt" data-opt="stick"${athlete.options?.vt?.stick ? ' checked' : ''} />
-        <span class="event-bonus-text"><strong>Stuck vault</strong><span>${stickHelp}</span></span>
-        <span class="event-bonus-value calc" data-calc="opt-vt-stick"></span>
-      </label>
       <p class="vault-note" id="vault-note" hidden></p>
     </article>`;
 }
@@ -548,6 +699,8 @@ function renderEditor() {
   ed.onclick = onEditorClick;
   ed.onkeydown = onEditorKey;
   ed.onpointerdown = onEditorPointerDown;
+  ed.onmousedown = (ev) => ev.target.closest('[data-combo]') && ev.preventDefault(); // keep focus in the skill input
+  ed.onfocusout = (ev) => ev.target === picker.input && closePicker();
   $('#summary').onclick = (ev) => {
     const t = ev.target.closest('[data-tab]');
     if (t) selectTab(t.dataset.tab);
@@ -567,7 +720,13 @@ function onSkillInput(ev) {
     return;
   }
   if (!t.dataset.event) return;
-  a.routines[t.dataset.event][Number(t.dataset.idx)][t.dataset.field] = t.value;
+  const row = a.routines[t.dataset.event][Number(t.dataset.idx)];
+  row[t.dataset.field] = t.value;
+  if (t.dataset.field === 'name') {
+    // Editing a picked skill's name makes it a custom skill.
+    if (row.skillId && findSkill(row.skillId)?.label !== t.value) delete row.skillId;
+    openPicker(t, t.value);
+  }
   updateComputed();
   scheduleSave();
 }
@@ -620,9 +779,6 @@ function updateComputed() {
     : v?.capped
       ? `Start value capped at ${fmt(LEVELS[level].cap)} (${fmt(v.raw)} before the cap).`
       : '';
-  const vStick = v && !v.banned && a.options?.vt?.stick ? vaultStickValue(level, v) : 0;
-  $('[data-calc="opt-vt-stick"]').textContent = vStick ? `+${fmt(vStick)}` : '';
-  $('#panel-vt .event-bonus').classList.toggle('on', !!vStick);
   $('[data-sv="vt"]').textContent = v ? v.startValue.toFixed(1) : '—';
 
   for (const e of EVENTS) {
@@ -643,20 +799,31 @@ function updateComputed() {
       // height; the full explanation is in its tooltip.
       const flagEl = $('[data-calc="flag"]', rowEl);
       const overEg = nonCounting && it.reason === 'eg';
+      const overSr = nonCounting && it.reason === 'sr';
       flagEl.textContent = repeat
         ? `Repeat of Skill ${it.repeatOf + 1}`
         : overEg
           ? `Over ${MAX_PER_EG} in EG ${ROMAN[it.eg]}`
-          : nonCounting
-            ? `Not in Top ${max}`
-            : '';
+          : overSr
+            ? `Over ${SR_MAX_STATIC} EG II/III`
+            : nonCounting
+              ? `Not in Top ${max}`
+              : '';
       flagEl.title = repeat
         ? `Repeat of skill ${it.repeatOf + 1}: each skill only counts once`
         : overEg
           ? `Only ${MAX_PER_EG} skills from one element group count, so this one doesn't count toward difficulty`
-          : nonCounting
-            ? `Not in your top ${max}, so it doesn't count toward difficulty`
-            : '';
+          : overSr
+            ? `Only ${SR_MAX_STATIC} EG II or III skills count before a B or higher EG I skill, so this one doesn't count toward difficulty`
+            : nonCounting
+              ? `Not in your top ${max}, so it doesn't count toward difficulty`
+              : '';
+      const src = findSkill(a.routines[e][it.idx]?.skillId)?.src || (it.name ? 'Custom' : '');
+      const badge = $('[data-calc="src"]', rowEl);
+      badge.textContent = src;
+      badge.className = `src-badge ${src.toLowerCase()}`;
+      badge.title = src === 'Custom' ? 'Not from the skill list: difficulty and EG are set by hand' : '';
+      $('.skill-input', rowEl).title = it.name; // long names are cut off in the box
     }
     const filled = r.items.filter((it) => it.status !== 'blank').length;
     $('[data-calc="count"]', card).textContent = `${r.rows.length} of ${max} counting · ${filled} skill${filled === 1 ? '' : 's'} listed`;

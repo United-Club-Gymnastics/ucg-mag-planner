@@ -8,7 +8,8 @@ export const MIN_SKILLS = 6;
 export const MAX_ROUTINE = 20; // skills a routine list can hold (counting + non-counting)
 export const MAX_PER_EG = 4; // WG: at most 4 counting skills from one element group
 
-export const LETTER_VALUES = { A: 0.1, B: 0.2, C: 0.3, D: 0.4, E: 0.5, F: 0.6, G: 0.7, H: 0.8, I: 0.9, J: 1.0 };
+// Sub-A skills (UCG CoP) are recognised skills worth 0.0, with no EG.
+export const LETTER_VALUES = { 'Sub-A': 0, A: 0.1, B: 0.2, C: 0.3, D: 0.4, E: 0.5, F: 0.6, G: 0.7, H: 0.8, I: 0.9, J: 1.0 };
 export const LETTERS = Object.keys(LETTER_VALUES);
 export const ROMAN = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV' };
 
@@ -18,21 +19,18 @@ export const LEVELS = {
     maxSkills: 6,
     shortDeduction: 0.5,
     cap: 12.3,
-    stick: 0.1,
   },
   int: {
     label: 'Intermediate',
     maxSkills: 8,
     shortDeduction: 1.0,
     cap: 13.1,
-    stick: 0.1,
   },
   adv: {
     label: 'Advanced (GymACT)',
     maxSkills: 8,
     shortDeduction: 1.0,
     cap: null,
-    stick: null, // +0.1 for a B dismount, +0.2 for C or higher
   },
 };
 export const LEVEL_IDS = Object.keys(LEVELS);
@@ -84,10 +82,9 @@ export const APPARATUS = {
 //            requirement whose absence costs the value
 //   count    number of times a bonus is earned (value each, max `max`)
 //   mushroom Pommel Horse mushroom bonus, 0.0-1.0
-//   stick    stuck dismount bonus (value depends on level and dismount)
+// Stick bonuses aren't here: they depend on the live routine, not the plan.
 export function eventOptions(event, level) {
   const o = [];
-  const stick = { id: 'stick', kind: 'stick', label: 'Stuck dismount', help: stickHelp(level) };
   if (event === 'fx') {
     o.push({ id: 'conn1', kind: 'count', value: 0.1, max: 5, label: 'D or higher + B/C connection', help: '+0.1 each' });
     o.push({ id: 'conn2', kind: 'count', value: 0.2, max: 5, label: 'D or higher + D or higher connection', help: '+0.2 each' });
@@ -95,7 +92,6 @@ export function eventOptions(event, level) {
       o.push({ id: 'dblDismount', kind: 'check', value: 0.1, label: 'Double flipping dismount', help: '+0.1' });
       o.push({ id: 'dblFlip', kind: 'check', value: 0.3, deduction: true, label: 'Routine includes a double flip', help: 'Required: -0.3 neutral deduction if missing' });
     }
-    o.push(stick);
   }
   if (event === 'ph' && level === 'dev') {
     o.push({ id: 'mushroom', kind: 'mushroom', label: 'Mushroom bonus', help: '+0.1 per circle, +0.2 per other skill; top 5 count, max +1.0' });
@@ -105,18 +101,11 @@ export function eventOptions(event, level) {
     if (level === 'adv') {
       o.push({ id: 'swingHs', kind: 'check', value: 0.3, deduction: true, label: 'Routine includes a swing to handstand', help: 'Required: -0.3 neutral deduction if missing' });
     }
-    o.push(stick);
   }
-  if (event === 'pb') o.push(stick);
   if (event === 'hb') {
     o.push({ id: 'connCC', kind: 'count', value: 0.1, max: 5, label: 'C + C connection', help: 'Flight to flight, or in bar to flight / flight to in bar with no intermediate swing: +0.1 each' });
-    o.push(stick);
   }
   return o;
-}
-
-function stickHelp(level) {
-  return level === 'adv' ? '+0.1 for a B dismount, +0.2 for C or higher' : '+0.1';
 }
 
 // Avoid floating point noise (0.1 + 0.2 etc.).
@@ -124,10 +113,12 @@ export const round1 = (n) => Math.round(n * 10) / 10;
 export const fmt = (n) => Number(n || 0).toFixed(1);
 
 export function letterValue(letter) {
-  return LETTER_VALUES[String(letter || '').toUpperCase()] ?? 0;
+  const l = String(letter || '');
+  return LETTER_VALUES[l] ?? LETTER_VALUES[l.toUpperCase()] ?? 0;
 }
 
 const isFilled = (s) => !!(s && (String(s.name || '').trim() || s.letter));
+export const SR_MAX_STATIC = 3; // WG rings: EG II/III skills before a B or higher EG I skill
 
 // "Back giant", "backgiant" and "Back-Giant" are the same skill.
 export const skillKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -148,6 +139,8 @@ function groupBonus(level, event, eg, value) {
  * skills: the whole routine in order, [{ name, letter, eg }] (blank rows allowed).
  *   - Each skill counts once: a later skill with the same name (ignoring case,
  *     spaces and punctuation) is a repeat and doesn't count.
+ *   - Rings (WG rule): only the first 3 EG II/III skills count until a B or
+ *     higher EG I skill is performed (reason 'sr').
  *   - The level's highest-value skills count (6 Developmental, 8 otherwise),
  *     at most 4 from one element group. Ties: the earlier skill wins.
  * options: { [optionId]: true | number } for the event's bonus options.
@@ -155,7 +148,7 @@ function groupBonus(level, event, eg, value) {
  * Returns:
  *   items   one entry per input row with status 'blank' | 'counting' |
  *           'noncounting' | 'repeat' (repeatOf) and, for non-counting skills,
- *           reason 'top' | 'eg' (over the 4-per-group limit)
+ *           reason 'top' | 'eg' (over the 4-per-group limit) | 'sr'
  *   rows    counting skills in routine order
  *   and totals.
  */
@@ -179,6 +172,21 @@ export function scoreRoutine(event, level, skills = [], options = {}) {
       it.status = 'repeat';
       it.repeatOf = firstSeen.get(key);
     } else if (key) firstSeen.set(key, it.idx);
+  }
+
+  if (event === 'sr') {
+    let statics = 0;
+    for (const it of items) {
+      if (it.status) continue;
+      if (it.eg === 1 && it.value >= 0.2) break;
+      if (it.eg === 2 || it.eg === 3) {
+        statics++;
+        if (statics > SR_MAX_STATIC) {
+          it.status = 'noncounting';
+          it.reason = 'sr';
+        }
+      }
+    }
   }
 
   const perGroup = {};
@@ -217,13 +225,6 @@ export function scoreRoutine(event, level, skills = [], options = {}) {
 
   const difficulty = round1(rows.reduce((t, r) => t + r.value, 0));
 
-  // The dismount: for stick bonus on Advanced, the highest-value counting
-  // dismount (group IV), or on floor the last counting skill.
-  const dismount =
-    event === 'fx'
-      ? rows[rows.length - 1]
-      : rows.filter((r) => r.eg === 4).sort((a, b) => b.value - a.value)[0];
-
   let bonus = 0;
   let deductions = 0;
   const optionValues = {};
@@ -237,7 +238,6 @@ export function scoreRoutine(event, level, skills = [], options = {}) {
     if (o.kind === 'check' && v) got = o.value;
     if (o.kind === 'count') got = Math.min(Math.max(0, Number(v) || 0), o.max) * o.value;
     if (o.kind === 'mushroom') got = Math.min(Math.max(0, Number(v) || 0), 1);
-    if (o.kind === 'stick' && v) got = stickValue(level, dismount);
     optionValues[o.id] = round1(got);
     bonus += got;
   }
@@ -258,7 +258,6 @@ export function scoreRoutine(event, level, skills = [], options = {}) {
     egTotal,
     bonus,
     optionValues,
-    dismount,
     shortBy,
     shortDeduction,
     raw,
@@ -270,43 +269,26 @@ export function scoreRoutine(event, level, skills = [], options = {}) {
   };
 }
 
-function stickValue(level, dismount) {
-  const L = LEVELS[level];
-  if (L.stick != null) return L.stick;
-  if (!dismount) return 0;
-  return dismount.value >= 0.3 ? 0.2 : dismount.value >= 0.2 ? 0.1 : 0;
-}
-
 export function findVault(id) {
   return VAULTS.find((v) => v.id === String(id)) ?? null;
 }
 
-// Stuck vault bonus. Developmental: +0.1 (flipping vaults are banned).
-// Intermediate: +0.1 non-flipping, +0.2 flipping. Advanced: +0.2 flipping only.
-export function vaultStickValue(level, v) {
-  if (!v) return 0;
-  if (level === 'dev') return 0.1;
-  if (level === 'int') return v.flipping ? 0.2 : 0.1;
-  return v.flipping ? 0.2 : 0;
-}
-
-export function scoreVault(level, id, { stick = false } = {}) {
+export function scoreVault(level, id) {
   const v = findVault(id);
   if (!v) return null;
   const L = LEVELS[level] || LEVELS.int;
   const dv = level === 'adv' ? v.adv : v.value;
   if (level === 'dev' && v.flipping) {
-    return { ...v, dv, stick: 0, banned: true, capped: false, startValue: 0 };
+    return { ...v, dv, banned: true, capped: false, startValue: 0 };
   }
-  const stickBonus = stick ? vaultStickValue(level, v) : 0;
-  const raw = round1(EXECUTION + dv + stickBonus);
+  const raw = round1(EXECUTION + dv);
   const capped = L.cap != null && raw > L.cap;
-  return { ...v, dv, stick: stickBonus, banned: false, raw, capped, startValue: capped ? L.cap : raw };
+  return { ...v, dv, banned: false, raw, capped, startValue: capped ? L.cap : raw };
 }
 
 export function scoreAthlete(athlete) {
   const level = LEVELS[athlete.level] ? athlete.level : 'int';
-  const vault = scoreVault(level, athlete.vault, { stick: !!athlete.options?.vt?.stick });
+  const vault = scoreVault(level, athlete.vault);
   const events = Object.fromEntries(
     EVENTS.map((e) => [e, scoreRoutine(e, level, athlete.routines?.[e] || [], athlete.options?.[e] || {})])
   );

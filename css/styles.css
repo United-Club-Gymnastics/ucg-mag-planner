@@ -328,7 +328,7 @@ input::placeholder { color: var(--fg-muted); }
 .skill-table { padding: 8px 14px; overflow-x: auto; }
 .skill-row {
   display: grid;
-  grid-template-columns: 50px minmax(120px, 1fr) 68px minmax(150px, 240px) 56px 64px 28px;
+  grid-template-columns: 50px minmax(160px, 1fr) 78px minmax(150px, 230px) 56px 64px 28px;
   gap: 4px 8px; align-items: center; padding: 5px 8px; border-radius: var(--radius);
   transition: background var(--duration-1) var(--ease);
 }
@@ -342,6 +342,47 @@ input::placeholder { color: var(--fg-muted); }
 .calc, .skill-head .col-value, .skill-head .col-bonus { text-align: center; font-variant-numeric: tabular-nums; }
 .calc { font-size: var(--fs-sm); }
 .skill-row.has-bonus .col-bonus { color: var(--fg-accent); font-weight: 600; }
+
+/* ---- Skill picker ---- */
+.skill-combo { position: relative; display: block; min-width: 0; }
+.skill-row .skill-input { padding-right: 96px; text-overflow: ellipsis; }
+.skill-combo .src-badge { position: absolute; right: 32px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.combo-toggle {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ucg-navy); cursor: pointer;
+}
+.combo-toggle:hover { background: rgba(173, 186, 233, 0.3); }
+.src-badge {
+  display: inline-block; padding: 2px 6px; border-radius: var(--radius-pill); flex: none;
+  font-family: var(--font-display); font-weight: 700; font-size: 0.66rem; letter-spacing: 0.08em; line-height: 1.3;
+}
+.src-badge:empty { display: none; }
+.src-badge.ucg { background: var(--ucg-blue-green); color: var(--ucg-navy); }
+.src-badge.wg { background: var(--ucg-navy); color: var(--ucg-light-blue); }
+.src-badge.custom { box-shadow: inset 0 0 0 1px var(--border-default); color: var(--fg-secondary); text-transform: uppercase; }
+
+.skill-pop {
+  position: fixed; z-index: 50; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--ucg-white); color: var(--ucg-navy);
+  border: 1.5px solid var(--border-default); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  font-size: var(--fs-sm);
+}
+.pop-head {
+  position: sticky; top: 0; z-index: 1; padding: 6px 12px; background: #eef5f6; color: var(--fg-secondary);
+  font-family: var(--font-display); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.pop-opt { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; padding: 6px 12px; cursor: pointer; }
+.pop-opt .src-badge { justify-self: start; }
+.pop-opt:hover, .pop-opt.active { background: var(--ucg-light-blue); }
+.pop-name { min-width: 0; }
+.pop-eponym { color: var(--fg-secondary); }
+.pop-meta { white-space: nowrap; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pop-foot, .pop-empty {
+  padding: 8px 12px; border-top: 1px solid var(--border-subtle); color: var(--fg-secondary); font-size: var(--fs-xs);
+}
+.pop-foot .src-badge { margin: 0 2px 0 6px; vertical-align: 1px; }
+.pop-foot .src-badge:first-child { margin-left: 0; }
 
 /* ---- Routine: instructions, reorder, statuses ---- */
 .routine-help { margin: 14px 20px 2px; font-size: var(--fs-sm); color: var(--fg-secondary); max-width: 90ch; }
@@ -383,13 +424,13 @@ input::placeholder { color: var(--fg-muted); }
 /* Counting skills sit on the blue green card colour (as the event bonus box
    when it's on); repeats and non-counting skills get a gray bar and a flag. */
 .skill-row.is-counting { background: var(--ucg-blue-green); }
-.skill-row.is-counting .col-name, .skill-row.is-counting select { background-color: var(--ucg-white); border-color: var(--ucg-white); }
+.skill-row.is-counting .skill-input, .skill-row.is-counting select { background-color: var(--ucg-white); border-color: var(--ucg-white); }
 .skill-row.is-counting .col-num, .skill-row.is-counting .drag-handle, .skill-row.is-counting .remove-skill { color: var(--ucg-navy); }
 .skill-row.is-counting .col-bonus { color: var(--ucg-navy); }
 
 .skill-row.is-repeat, .skill-row.non-counting { background: #e9edef; }
-.skill-row.is-repeat .col-name, .skill-row.is-repeat select,
-.skill-row.non-counting .col-name, .skill-row.non-counting select { background-color: var(--ucg-white); }
+.skill-row.is-repeat .skill-input, .skill-row.is-repeat select,
+.skill-row.non-counting .skill-input, .skill-row.non-counting select { background-color: var(--ucg-white); }
 
 /* ---- Event bonus toggle ---- */
 .event-bonus {
@@ -425,7 +466,12 @@ input::placeholder { color: var(--fg-muted); }
   display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: center;
   padding: 16px 20px; border-top: 1px solid var(--border-subtle); background: #f4f9fa;
 }
-.cg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-xs); color: var(--fg-muted); flex: 1 1 340px; }
+.cg-list {
+  list-style: none; margin: 0; padding: 0; flex: 1 1 100%;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 16px;
+  font-size: var(--fs-xs); color: var(--fg-muted);
+}
+.totals { margin-left: auto; }
 .cg-list li { display: flex; gap: 10px; align-items: center; }
 .cg-badge {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;

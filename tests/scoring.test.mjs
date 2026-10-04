@@ -105,7 +105,7 @@ test('short routine: Developmental loses 0.5 per skill, others 1.0', () => {
 });
 
 test('at most 4 counting skills per element group', () => {
-  const r = scoreRoutine('sr', 'adv', [
+  const r = scoreRoutine('pb', 'adv', [
     s('a', 'C', 2), s('b', 'C', 2), s('c', 'C', 2), s('d', 'C', 2), s('e', 'B', 2), s('f', 'A', 1),
   ]);
   assert.equal(r.items[4].status, 'noncounting');
@@ -119,12 +119,30 @@ test('repeats do not count', () => {
   assert.equal(r.difficulty, 0.1);
 });
 
-test('bonuses: rings strength +0.3, floor connections, Advanced stick by dismount value', () => {
+test('bonuses: rings strength +0.3, floor and high bar connections; no stick bonus', () => {
   assert.equal(scoreRoutine('sr', 'int', advRings, { strength: true }).bonus, 0.3);
   assert.equal(scoreRoutine('fx', 'int', advFloor, { conn1: 2, conn2: 1 }).bonus, 0.4);
-  assert.equal(scoreRoutine('pb', 'adv', advPbars, { stick: true }).bonus, 0.1); // B dismount
-  assert.equal(scoreRoutine('hb', 'adv', advHbar, { stick: true }).bonus, 0); // A dismount
-  assert.equal(scoreRoutine('hb', 'int', advHbar, { stick: true }).bonus, 0.1);
+  assert.equal(scoreRoutine('hb', 'int', advHbar, { connCC: 2 }).bonus, 0.2);
+  assert.equal(scoreRoutine('hb', 'int', advHbar, { stick: true }).bonus, 0);
+});
+
+test('rings: only 3 EG II/III skills count before a B or higher EG I skill', () => {
+  const r = scoreRoutine('sr', 'int', [
+    s('L', 'A', 2), s('Cross', 'C', 2), s('Kip to L', 'B', 3), s('Back lever', 'B', 2),
+    s('Swing handstand', 'B', 1), s('Planche', 'D', 2), s('Dislocate', 'A', 1),
+  ]);
+  assert.equal(r.items[3].status, 'noncounting');
+  assert.equal(r.items[3].reason, 'sr');
+  assert.equal(r.items[5].status, 'counting'); // after the B EG I skill
+  const a = scoreRoutine('sr', 'int', [s('a', 'A', 2), s('b', 'A', 3), s('c', 'A', 2), s('d', 'A', 1), s('e', 'A', 2)]);
+  assert.equal(a.items[4].reason, 'sr'); // an A EG I skill doesn't reset the count
+});
+
+test('Sub-A skills count as skills worth 0.0', () => {
+  const r = scoreRoutine('sr', 'int', [s('Basket pull up to L', 'Sub-A', ''), s('a', 'A', 1), s('b', 'A', 2), s('c', 'A', 3), s('d', 'A', 4), s('e', 'B', 1)]);
+  assert.equal(r.rows.length, 6);
+  assert.equal(r.shortBy, 0);
+  assert.equal(r.difficulty, 0.6);
 });
 
 test('mushroom bonus counts toward the Developmental cap', () => {
@@ -137,9 +155,6 @@ test('vault: Advanced uses its own values; Developmental bans flipping vaults', 
   assert.equal(scoreVault('adv', '202').startValue, 11.4);
   assert.equal(scoreVault('adv', '105').startValue, 13.6);
   assert.equal(scoreVault('int', '105').startValue, 12.8);
-  assert.equal(scoreVault('int', '105', { stick: true }).startValue, 13.0);
-  assert.equal(scoreVault('int', '202', { stick: true }).startValue, 11.5);
-  assert.equal(scoreVault('adv', '202', { stick: true }).startValue, 11.4);
   assert.equal(scoreVault('dev', '105').startValue, 0);
   assert.ok(scoreVault('dev', '105').banned);
   assert.equal(scoreVault('int', '225').startValue, 13.1); // capped
