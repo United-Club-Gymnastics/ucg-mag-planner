@@ -2,14 +2,19 @@ import * as store from './store.js';
 import { VAULTS } from './vaults.js';
 import {
   APPARATUS,
+  ALL_EVENTS,
   EVENTS,
   LETTERS,
-  MAX_SKILLS,
+  LEVELS,
+  LEVEL_IDS,
+  MAX_PER_EG,
   MAX_ROUTINE,
   MIN_SKILLS,
-  EVENT_BONUS,
+  ROMAN,
+  eventOptions,
   fmt,
   scoreAthlete,
+  vaultStickValue,
 } from './scoring.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -18,56 +23,51 @@ const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const app = $('#app');
-const TABS = ['vault', ...EVENTS];
+const TABS = ALL_EVENTS;
 const state = { user: null, athletes: [], selectedId: null, tab: readTab() };
 
 function readTab() {
   try {
     const t = localStorage.getItem('sv-tab');
-    return TABS.includes(t) ? t : 'vault';
+    return TABS.includes(t) ? t : 'fx';
   } catch {
-    return 'vault';
+    return 'fx';
   }
 }
 
 const blankSkill = () => ({ name: '', letter: '', eg: '' });
-const blankRoutine = () => Array.from({ length: MAX_SKILLS }, blankSkill);
+const DEFAULT_LEVEL = 'int';
+const levelOf = (a) => (LEVELS[a?.level] ? a.level : DEFAULT_LEVEL);
+const maxSkills = (a) => LEVELS[levelOf(a)].maxSkills;
+const blankRoutine = (n) => Array.from({ length: n }, blankSkill);
 const isBlank = (s) => !String(s?.name || '').trim() && !s?.letter;
 const newAthlete = () => ({
   id: store.newId(),
   name: '',
   club: '',
+  level: DEFAULT_LEVEL,
   vault: '',
-  routines: Object.fromEntries(EVENTS.map((e) => [e, blankRoutine()])),
-  eventBonus: Object.fromEntries(EVENTS.map((e) => [e, false])),
+  routines: Object.fromEntries(EVENTS.map((e) => [e, blankRoutine(LEVELS[DEFAULT_LEVEL].maxSkills)])),
+  options: {},
   createdAt: Date.now(),
 });
 
-// Older/partial records: every routine shows at least MAX_SKILLS rows.
-// Records from before routines could hold non-counting skills kept separate
-// "EG bonus skills" (egSkills); those move to the end of the routine, where a
-// non-counting skill earns the same element group credit. Returns true if the
-// record changed and should be saved.
+// Partial records: fill in missing fields, and show at least as many skill
+// rows as the athlete's level counts. Returns true if the record changed.
 function normalize(a) {
-  let migrated = false;
+  let changed = false;
+  if (!LEVELS[a.level]) {
+    a.level = DEFAULT_LEVEL;
+    changed = true;
+  }
   a.routines ||= {};
-  a.eventBonus ||= {};
+  a.options ||= {};
   for (const e of EVENTS) {
-    let r = [...(a.routines[e] || [])];
-    const extra = (a.egSkills?.[e] || []).filter((x) => !isBlank(x));
-    if (extra.length) {
-      while (r.length && isBlank(r[r.length - 1])) r.pop();
-      r.push(...extra);
-      migrated = true;
-    }
-    while (r.length < MAX_SKILLS) r.push(blankSkill());
+    const r = [...(a.routines[e] || [])];
+    while (r.length < maxSkills(a)) r.push(blankSkill());
     a.routines[e] = r.slice(0, MAX_ROUTINE);
   }
-  if ('egSkills' in a) {
-    delete a.egSkills;
-    migrated = true;
-  }
-  return migrated;
+  return changed;
 }
 
 const selected = () => state.athletes.find((a) => a.id === state.selectedId);
@@ -135,8 +135,8 @@ function renderShell() {
   app.innerHTML = `
     <section class="page-head">
       <div class="page-head-inner">
-        <p class="eyebrow">UCG Infinity</p>
-        <h1>Start value sheets</h1>
+        <p class="eyebrow">UCG MAG</p>
+        <h1>Routine planner</h1>
       </div>
     </section>
     <div class="layout">
@@ -173,7 +173,7 @@ function renderList() {
       return `<li>
         <button type="button" data-id="${esc(a.id)}" class="athlete-item${a.id === state.selectedId ? ' active' : ''}">
           <span class="athlete-name">${esc(a.name || 'Unnamed athlete')}</span>
-          <span class="athlete-meta">${esc(a.club || '')}</span>
+          <span class="athlete-meta">${esc([LEVELS[levelOf(a)].label, a.club].filter(Boolean).join(' · '))}</span>
           <span class="athlete-aa">${fmt(aa)}</span>
         </button>
       </li>`;
@@ -215,19 +215,20 @@ async function removeAthlete() {
 
 // ---- Editor ----------------------------------------------------------------
 
-function vaultOptions(current) {
+function vaultOptions(current, level) {
   const groups = {};
-  for (const v of VAULTS) (groups[v.entry] ||= []).push(v);
+  for (const v of VAULTS) (groups[v.eg] ||= []).push(v);
   return (
     `<option value="">— No vault —</option>` +
     Object.entries(groups)
       .map(
-        ([entry, list]) =>
-          `<optgroup label="${esc(entry)}">${list
-            .map(
-              (v) =>
-                `<option value="${esc(v.name)}"${v.name === current ? ' selected' : ''}>${esc(v.name)} (${fmt(v.dv)})</option>`
-            )
+        ([eg, list]) =>
+          `<optgroup label="Element group ${esc(eg)}">${list
+            .map((v) => {
+              const banned = level === 'dev' && v.flipping;
+              const dv = level === 'adv' ? v.adv : v.value;
+              return `<option value="${esc(v.id)}"${v.id === String(current) ? ' selected' : ''}>${esc(v.id)} · ${esc(v.name)} (${banned ? 'not allowed' : fmt(dv)})</option>`;
+            })
             .join('')}</optgroup>`
       )
       .join('')
@@ -257,11 +258,10 @@ function skillRow(event, i, s) {
       <select class="col-eg" aria-label="${label} element group" ${data} data-field="eg">
         <option value="">EG –</option>
         ${Object.entries(groups)
-          .map(([n, g]) => `<option value="${n}"${String(n) === String(s.eg) ? ' selected' : ''}>${n}. ${esc(g)}</option>`)
+          .map(([n, g]) => `<option value="${n}"${String(n) === String(s.eg) ? ' selected' : ''}>${ROMAN[n]}. ${esc(g)}</option>`)
           .join('')}
       </select>
       <span class="col-value calc" data-calc="value"></span>
-      <span class="col-cg calc" data-calc="cg"></span>
       <span class="col-bonus calc" data-calc="bonus"></span>
       <button type="button" class="remove-skill" data-remove-skill="${event}" data-idx="${i}" aria-label="Remove ${label}" title="Remove skill">${ICON_X}</button>
       <span class="row-flag" data-calc="flag"></span>
@@ -276,8 +276,7 @@ function routineRows(event, athlete) {
       <span class="col-letter">Diff.</span>
       <span class="col-eg">Element group</span>
       <span class="col-value">Value</span>
-      <span class="col-cg">CEG</span>
-      <span class="col-bonus">Bonus</span>
+      <span class="col-bonus">EG bonus</span>
       <span></span>
     </div>
     ${athlete.routines[event].map((s, i) => skillRow(event, i, s)).join('')}`;
@@ -323,7 +322,7 @@ function onEditorClick(ev) {
     const list = a.routines[e];
     const i = Number(remove.dataset.idx);
     list.splice(i, 1);
-    if (list.length < MAX_SKILLS) list.push(blankSkill());
+    if (list.length < maxSkills(a)) list.push(blankSkill());
     renderRoutine(e, { row: Math.min(i, list.length - 1), part: 'name' });
     scheduleSave();
   }
@@ -385,18 +384,38 @@ function onEditorPointerDown(ev) {
 }
 
 const EXPORT_TIP =
-  'Exports the 8 counting skills for each event, plus any non-counting skill that earns element group credit. ' +
-  'Repeated skills and other non-counting skills are left off the worksheet.';
+  "Fills in your level's UCG MAG Start Value Worksheet with the counting skills, one page per event. " +
+  'Repeated and non-counting skills are left off.';
+
+function optionControl(event, o, athlete) {
+  const v = athlete.options?.[event]?.[o.id];
+  const data = `data-option="${event}" data-opt="${o.id}"`;
+  let control;
+  if (o.kind === 'count') {
+    control = `<select ${data} aria-label="${esc(o.label)}">${Array.from({ length: o.max + 1 }, (_, n) => `<option value="${n}"${Number(v || 0) === n ? ' selected' : ''}>${n}</option>`).join('')}</select>`;
+  } else if (o.kind === 'mushroom') {
+    control = `<select ${data} aria-label="${esc(o.label)}">${Array.from({ length: 11 }, (_, n) => {
+      const x = n / 10;
+      return `<option value="${x}"${Number(v || 0) === x ? ' selected' : ''}>+${x.toFixed(1)}</option>`;
+    }).join('')}</select>`;
+  } else {
+    control = `<input type="checkbox" ${data}${v ? ' checked' : ''} />`;
+  }
+  const leading = o.kind === 'check' || o.kind === 'stick';
+  return `
+    <label class="event-bonus${o.deduction ? ' requirement' : ''}" data-option-row="${o.id}">
+      ${leading ? control : ''}
+      <span class="event-bonus-text"><strong>${esc(o.label)}</strong><span>${esc(o.help)}</span></span>
+      ${leading ? '' : control}
+      <span class="event-bonus-value calc" data-calc="opt-${o.id}"></span>
+    </label>`;
+}
 
 function eventCard(event, athlete) {
   const ap = APPARATUS[event];
-  const condensed = Object.entries(ap.condensed)
-    .map(
-      ([cg, egs]) =>
-        `<li data-cg="${cg}"><span class="cg-badge">${cg}</span><span>${egs
-          .map((n) => `${n}. ${esc(ap.groups[n])}`)
-          .join(' · ')}</span></li>`
-    )
+  const level = levelOf(athlete);
+  const groups = Object.entries(ap.groups)
+    .map(([n, g]) => `<li data-cg="${n}"><span class="cg-badge">${ROMAN[n]}</span><span>${esc(g)}</span></li>`)
     .join('');
   return `
     <article class="card event-card" data-event-card="${event}" id="panel-${event}" data-panel="${event}" role="tabpanel" aria-labelledby="tab-${event}">
@@ -409,7 +428,8 @@ function eventCard(event, athlete) {
       </header>
       <p class="routine-help">
         List the whole routine in order, and drag <span class="grip-inline">${ICON_GRIP}</span> to reorder.
-        <strong>Each skill counts only once</strong>, and your ${MAX_SKILLS} highest-value skills count toward difficulty.
+        <strong>Each skill counts only once</strong>. Your ${maxSkills(athlete)} highest-value skills count toward difficulty,
+        with at most ${MAX_PER_EG} from one element group.
         Counting skills are highlighted; repeats and non-counting skills are shaded gray and flagged.
       </p>
       <div class="skill-table" data-routine="${event}">${routineRows(event, athlete)}</div>
@@ -417,22 +437,47 @@ function eventCard(event, athlete) {
         <button class="btn btn-ghost btn-sm" type="button" data-add-skill="${event}">Add skill</button>
         <span class="routine-count" data-calc="count"></span>
       </div>
-      <label class="event-bonus">
-        <input type="checkbox" data-bonus="${event}"${athlete.eventBonus?.[event] ? ' checked' : ''} />
-        <span class="event-bonus-text"><strong>Apparatus bonus +${fmt(EVENT_BONUS)}</strong><span>${esc(ap.eventBonus)}</span></span>
-        <span class="event-bonus-value calc" data-calc="event-bonus"></span>
-      </label>
+      ${eventOptions(event, level).map((o) => optionControl(event, o, athlete)).join('')}
       <div class="event-foot">
-        <ul class="cg-list">${condensed}</ul>
+        <ul class="cg-list">${groups}</ul>
         <dl class="totals">
           <div><dt>Execution</dt><dd>10.0</dd></div>
           <div><dt>Difficulty</dt><dd data-total="difficulty"></dd></div>
           <div><dt>EG bonus</dt><dd data-total="eg"></dd></div>
-          <div><dt>Apparatus bonus</dt><dd data-total="event-bonus"></dd></div>
+          <div><dt>Other bonus</dt><dd data-total="bonus"></dd></div>
           <div><dt>Short of ${MIN_SKILLS}</dt><dd data-total="short"></dd></div>
           <div class="grand"><dt>Start value</dt><dd data-total="sv"></dd></div>
         </dl>
+        <p class="sv-note" data-calc="sv-note" hidden></p>
       </div>
+    </article>`;
+}
+
+function vaultCard(athlete) {
+  const level = levelOf(athlete);
+  const stickHelp =
+    level === 'dev'
+      ? '+0.1'
+      : level === 'int'
+        ? '+0.1 non-flipping vault, +0.2 flipping vault'
+        : '+0.2 for a flipping vault (no bonus for non-flipping vaults)';
+  return `
+    <article class="card vault-card" id="panel-vt" data-panel="vt" role="tabpanel" aria-labelledby="tab-vt">
+      <header class="card-head">
+        <h2 class="card-title">Vault</h2>
+        <div class="card-head-right"><span class="sv-pill" data-sv="vt"></span></div>
+      </header>
+      <div class="vault-body">
+        <label class="field grow"><span>Select your vault</span>
+          <select id="f-vault">${vaultOptions(athlete.vault, level)}</select></label>
+        <dl class="vault-info" id="vault-info"></dl>
+      </div>
+      <label class="event-bonus">
+        <input type="checkbox" data-option="vt" data-opt="stick"${athlete.options?.vt?.stick ? ' checked' : ''} />
+        <span class="event-bonus-text"><strong>Stuck vault</strong><span>${stickHelp}</span></span>
+        <span class="event-bonus-value calc" data-calc="opt-vt-stick"></span>
+      </label>
+      <p class="vault-note" id="vault-note" hidden></p>
     </article>`;
 }
 
@@ -444,7 +489,7 @@ function renderEditor() {
     ed.innerHTML = `
       <div class="card empty-editor">
         <h2>Add your first athlete</h2>
-        <p>Each athlete gets a vault plus bars, beam, and floor routines. Start values update as you type, and you can export a filled-in worksheet PDF.</p>
+        <p>Each athlete gets floor, pommel horse, rings, vault, parallel bars and high bar. Start values update as you type, and you can export filled-in UCG start value worksheets.</p>
         <button class="btn btn-primary" type="button" id="empty-add">Add athlete</button>
       </div>`;
     $('#empty-add').onclick = addAthlete;
@@ -458,6 +503,8 @@ function renderEditor() {
           <input id="f-name" type="text" data-field="name" value="${esc(a.name)}" placeholder="Name" /></label>
         <label class="field"><span>Club</span>
           <input id="f-club" type="text" data-field="club" value="${esc(a.club)}" placeholder="Club / school" /></label>
+        <label class="field"><span>Level</span>
+          <select id="f-level">${LEVEL_IDS.map((l) => `<option value="${l}"${l === levelOf(a) ? ' selected' : ''}>${esc(LEVELS[l].label)}</option>`).join('')}</select></label>
       </div>
       <div class="editor-actions">
         <span id="save-status" class="save-status"></span>
@@ -468,19 +515,7 @@ function renderEditor() {
 
     <div class="summary" id="summary" role="tablist" aria-label="Events"></div>
 
-    <article class="card vault-card" id="panel-vault" data-panel="vault" role="tabpanel" aria-labelledby="tab-vault">
-      <header class="card-head">
-        <h2 class="card-title">Vault</h2>
-        <div class="card-head-right"><span class="sv-pill" data-sv="vault"></span></div>
-      </header>
-      <div class="vault-body">
-        <label class="field grow"><span>Select your vault</span>
-          <select id="f-vault">${vaultOptions(a.vault)}</select></label>
-        <dl class="vault-info" id="vault-info"></dl>
-      </div>
-    </article>
-
-    ${EVENTS.map((e) => eventCard(e, a)).join('')}
+    ${ALL_EVENTS.map((e) => (e === 'vt' ? vaultCard(a) : eventCard(e, a))).join('')}
   `;
 
   $('#f-name').oninput = (ev) => {
@@ -493,6 +528,13 @@ function renderEditor() {
     renderListSoon();
     scheduleSave();
   };
+  $('#f-level').onchange = (ev) => {
+    a.level = ev.target.value;
+    normalize(a);
+    renderList();
+    renderEditor();
+    scheduleSave();
+  };
   $('#f-vault').onchange = (ev) => {
     a.vault = ev.target.value;
     updateComputed();
@@ -500,7 +542,7 @@ function renderEditor() {
   };
   $('#delete-athlete').onclick = removeAthlete;
   $('#export-all').onclick = (ev) => runExport(ev.currentTarget, EVENTS);
-  $$('[data-export]', ed).forEach((b) => (b.onclick = () => runExport(b, [b.dataset.export], false)));
+  $$('[data-export]', ed).forEach((b) => (b.onclick = () => runExport(b, [b.dataset.export])));
 
   ed.oninput = onSkillInput;
   ed.onclick = onEditorClick;
@@ -517,8 +559,9 @@ function renderEditor() {
 function onSkillInput(ev) {
   const t = ev.target;
   const a = selected();
-  if (t.dataset.bonus) {
-    a.eventBonus[t.dataset.bonus] = t.checked;
+  if (t.dataset.option) {
+    const opts = ((a.options ||= {})[t.dataset.option] ||= {});
+    opts[t.dataset.opt] = t.type === 'checkbox' ? t.checked : Number(t.value);
     updateComputed();
     scheduleSave();
     return;
@@ -560,15 +603,27 @@ function updateComputed() {
   const a = selected();
   if (!a) return;
   const score = scoreAthlete(a);
+  const level = score.level;
+  const max = maxSkills(a);
 
   // Vault
   const v = score.vault;
   $('#vault-info').innerHTML = v
-    ? `<div><dt>Entry type</dt><dd>${esc(v.entry)}</dd></div>
-       <div><dt>USAG VT #</dt><dd>${esc(v.usag)}</dd></div>
+    ? `<div><dt>Element group</dt><dd>${esc(v.eg)}</dd></div>
+       <div><dt>VT #</dt><dd>${esc(v.id)}</dd></div>
        <div><dt>D score</dt><dd>${fmt(v.dv)}</dd></div>`
     : '';
-  $('[data-sv="vault"]').textContent = v ? v.startValue.toFixed(1) : '—';
+  const vNote = $('#vault-note');
+  vNote.hidden = !(v?.banned || v?.capped);
+  vNote.textContent = v?.banned
+    ? 'Flipping vaults are not allowed at the Developmental level and score 0. Choose a handspring vault with no salto.'
+    : v?.capped
+      ? `Start value capped at ${fmt(LEVELS[level].cap)} (${fmt(v.raw)} before the cap).`
+      : '';
+  const vStick = v && !v.banned && a.options?.vt?.stick ? vaultStickValue(level, v) : 0;
+  $('[data-calc="opt-vt-stick"]').textContent = vStick ? `+${fmt(vStick)}` : '';
+  $('#panel-vt .event-bonus').classList.toggle('on', !!vStick);
+  $('[data-sv="vt"]').textContent = v ? v.startValue.toFixed(1) : '—';
 
   for (const e of EVENTS) {
     const card = $(`[data-event-card="${e}"]`);
@@ -583,66 +638,82 @@ function updateComputed() {
       rowEl.classList.toggle('non-counting', nonCounting);
       rowEl.classList.toggle('has-bonus', !!it.bonus);
       $('[data-calc="value"]', rowEl).textContent = repeat ? '—' : it.letter ? fmt(it.value) : '';
-      $('[data-calc="cg"]', rowEl).textContent = repeat ? '' : it.condensed ?? '';
       $('[data-calc="bonus"]', rowEl).textContent = it.bonus ? `+${fmt(it.bonus)}` : '';
-      // A short flag in place of Value / CEG keeps every row the same height;
-      // the full explanation is in its tooltip.
+      // A short flag in place of Value / Bonus keeps every row the same
+      // height; the full explanation is in its tooltip.
       const flagEl = $('[data-calc="flag"]', rowEl);
+      const overEg = nonCounting && it.reason === 'eg';
       flagEl.textContent = repeat
         ? `Repeat of Skill ${it.repeatOf + 1}`
-        : nonCounting
-          ? it.bonus
-            ? `EG ${it.condensed} Credit Only`
-            : `Not in Top ${MAX_SKILLS}`
-          : '';
+        : overEg
+          ? `Over ${MAX_PER_EG} in EG ${ROMAN[it.eg]}`
+          : nonCounting
+            ? `Not in Top ${max}`
+            : '';
       flagEl.title = repeat
         ? `Repeat of skill ${it.repeatOf + 1}: each skill only counts once`
-        : nonCounting
-          ? it.bonus
-            ? `Not in your top ${MAX_SKILLS}, so it adds no difficulty, but it earns the element group ${it.condensed} credit (+0.3)`
-            : `Not in your top ${MAX_SKILLS}, so it doesn't count toward difficulty`
-          : '';
+        : overEg
+          ? `Only ${MAX_PER_EG} skills from one element group count, so this one doesn't count toward difficulty`
+          : nonCounting
+            ? `Not in your top ${max}, so it doesn't count toward difficulty`
+            : '';
     }
     const filled = r.items.filter((it) => it.status !== 'blank').length;
-    $('[data-calc="count"]', card).textContent = `${r.rows.length} of ${MAX_SKILLS} counting · ${filled} skill${filled === 1 ? '' : 's'} listed`;
+    $('[data-calc="count"]', card).textContent = `${r.rows.length} of ${max} counting · ${filled} skill${filled === 1 ? '' : 's'} listed`;
     $(`[data-add-skill="${e}"]`, card).hidden = a.routines[e].length >= MAX_ROUTINE;
-    $$('.cg-list li', card).forEach((li) => li.classList.toggle('earned', r.earnedGroups.includes(li.dataset.cg)));
+    $$('.cg-list li', card).forEach((li) => li.classList.toggle('earned', r.egBonus[li.dataset.cg] != null));
+
+    for (const o of eventOptions(e, level)) {
+      const row = $(`[data-option-row="${o.id}"]`, card);
+      const el = $(`[data-calc="opt-${o.id}"]`, card);
+      if (o.deduction) {
+        const missing = !a.options?.[e]?.[o.id];
+        el.textContent = missing ? `−${fmt(o.value)}` : '';
+        row.classList.toggle('on', !missing);
+        row.classList.toggle('missing', missing && r.rows.length > 0);
+        continue;
+      }
+      const got = r.optionValues[o.id] || 0;
+      el.textContent = got ? `+${fmt(got)}` : '';
+      row.classList.toggle('on', !!got);
+    }
+
     $('[data-total="difficulty"]', card).textContent = fmt(r.difficulty);
     $('[data-total="eg"]', card).textContent = fmt(r.egTotal);
-    $('[data-total="event-bonus"]', card).textContent = fmt(r.eventBonus);
-    $('[data-calc="event-bonus"]', card).textContent = r.eventBonus ? `+${fmt(r.eventBonus)}` : '';
-    $('.event-bonus', card).classList.toggle('on', !!r.eventBonus);
-    $('[data-total="short"]', card).textContent = r.shortBy ? `−${fmt(r.shortBy)}` : '0.0';
+    $('[data-total="bonus"]', card).textContent = fmt(r.bonus);
+    $('[data-total="short"]', card).textContent = r.shortDeduction ? `−${fmt(r.shortDeduction)}` : '0.0';
     $('[data-total="sv"]', card).textContent = r.startValue.toFixed(1);
+    const notes = [];
+    if (r.capped) notes.push(`Start value capped at ${fmt(r.cap)} (${fmt(r.raw)} before the cap).`);
+    if (r.deductions) notes.push(`Expected neutral deduction −${fmt(r.deductions)}: ${fmt(r.afterDeductions)} after deductions.`);
+    const noteEl = $('[data-calc="sv-note"]', card);
+    noteEl.textContent = notes.join(' ');
+    noteEl.hidden = !notes.length;
     $(`[data-sv="${e}"]`).textContent = r.rows.length ? r.startValue.toFixed(1) : '—';
   }
 
   // The score tiles double as the event tabs.
   $('#summary').innerHTML =
-    [
-      ['vault', 'Vault', v?.startValue],
-      ...EVENTS.map((e) => [e, APPARATUS[e].short, score.events[e].rows.length ? score.events[e].startValue : null]),
-    ]
-      .map(([id, label, sv]) => {
-        const on = id === state.tab;
-        return `<button type="button" class="stat stat-tab${on ? ' active' : ''}" role="tab" id="tab-${id}" data-tab="${id}"
+    ALL_EVENTS.map((id) => {
+      const sv = id === 'vt' ? v?.startValue : score.events[id].rows.length ? score.events[id].startValue : null;
+      const on = id === state.tab;
+      return `<button type="button" class="stat stat-tab${on ? ' active' : ''}" role="tab" id="tab-${id}" data-tab="${id}"
           aria-selected="${on}" aria-controls="panel-${id}" tabindex="${on ? 0 : -1}">
-          <span>${label}</span><strong>${sv == null ? '—' : sv.toFixed(1)}</strong></button>`;
-      })
-      .join('') + `<div class="stat stat-aa"><span>All-Around</span><strong>${score.allAround.toFixed(1)}</strong></div>`;
+          <span>${APPARATUS[id].short}</span><strong>${sv == null ? '—' : sv.toFixed(1)}</strong></button>`;
+    }).join('') + `<div class="stat stat-aa"><span>All-Around</span><strong>${score.allAround.toFixed(1)}</strong></div>`;
   showPanel();
 
   renderListSoon();
 }
 
-async function runExport(button, events, includeSummary = true) {
+async function runExport(button, events) {
   const label = button.textContent;
   button.disabled = true;
   button.textContent = 'Building PDF…';
   try {
     const { exportAthletePdf, downloadPdf } = await import('./pdf.js');
     const athlete = selected();
-    downloadPdf(await exportAthletePdf(athlete, events, { includeSummary }), athlete, events);
+    downloadPdf(await exportAthletePdf(athlete, events), athlete, events);
   } catch (e) {
     console.error(e);
     alert(`Could not create the PDF: ${e?.message || e}`);

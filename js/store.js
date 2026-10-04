@@ -3,7 +3,9 @@
 import { firebaseConfig } from './firebase-config.js';
 
 const FB = 'https://www.gstatic.com/firebasejs/12.19.0';
-export const isConfigured = !String(firebaseConfig.apiKey || '').startsWith('YOUR_');
+// Add ?local to the address to try the app without signing in (saves in this browser only).
+const forceLocal = new URLSearchParams(location.search).has('local');
+export const isConfigured = !forceLocal && !String(firebaseConfig.apiKey || '').startsWith('YOUR_');
 
 let auth, db, fb;
 
@@ -36,7 +38,7 @@ export async function signOut() {
 
 // ---- Athletes -------------------------------------------------------------
 
-const LOCAL_KEY = 'sv-athletes';
+const LOCAL_KEY = 'mag-athletes';
 const readLocal = () => {
   try {
     return JSON.parse(localStorage.getItem(LOCAL_KEY)) || [];
@@ -46,7 +48,8 @@ const readLocal = () => {
 };
 const writeLocal = (list) => localStorage.setItem(LOCAL_KEY, JSON.stringify(list));
 
-const athletesCol = () => fb.collection(db, 'users', auth.currentUser.uid, 'athletes');
+// MAG athletes are kept apart from any other planner using the same Firebase project.
+const athletesCol = () => fb.collection(db, 'users', auth.currentUser.uid, 'magAthletes');
 
 export function newId() {
   return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();

@@ -1,116 +1,172 @@
-// UCG Infinity start value rules, mirrored from the WAG Open "SV Calculator"
-// spreadsheet and SV worksheet, plus the UCG event-specific bonus.
+// UCG MAG start value rules (2026-2028), from the UCG MAG Rules breakdown and
+// rules policy, the MAG start value worksheets, and the MAG Routine
+// Composition Planner spreadsheet.
 import { VAULTS } from './vaults.js';
 
 export const EXECUTION = 10;
-export const MAX_SKILLS = 8;
 export const MIN_SKILLS = 6;
 export const MAX_ROUTINE = 20; // skills a routine list can hold (counting + non-counting)
-export const EG_BONUS = 0.3;
-export const EG_BONUS_MIN_VALUE = 0.3; // B or higher
-export const EVENT_BONUS = 0.3;
+export const MAX_PER_EG = 4; // WG: at most 4 counting skills from one element group
 
-export const LETTER_VALUES = { A: 0.1, B: 0.3, C: 0.5, D: 0.7, E: 0.9 };
+export const LETTER_VALUES = { A: 0.1, B: 0.2, C: 0.3, D: 0.4, E: 0.5, F: 0.6, G: 0.7, H: 0.8, I: 0.9, J: 1.0 };
 export const LETTERS = Object.keys(LETTER_VALUES);
+export const ROMAN = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV' };
 
-export const EVENTS = ['bars', 'beam', 'floor'];
+export const LEVELS = {
+  dev: {
+    label: 'Developmental',
+    maxSkills: 6,
+    shortDeduction: 0.5,
+    cap: 12.3,
+    stick: 0.1,
+  },
+  int: {
+    label: 'Intermediate',
+    maxSkills: 8,
+    shortDeduction: 1.0,
+    cap: 13.1,
+    stick: 0.1,
+  },
+  adv: {
+    label: 'Advanced (GymACT)',
+    maxSkills: 8,
+    shortDeduction: 1.0,
+    cap: null,
+    stick: null, // +0.1 for a B dismount, +0.2 for C or higher
+  },
+};
+export const LEVEL_IDS = Object.keys(LEVELS);
 
-// Element groups and how they are condensed into groups I–IV for each apparatus.
+export const EVENTS = ['fx', 'ph', 'sr', 'pb', 'hb']; // vault is scored separately
+export const ALL_EVENTS = ['fx', 'ph', 'sr', 'vt', 'pb', 'hb']; // Olympic order
+
 export const APPARATUS = {
-  bars: {
-    label: 'Uneven Bars',
-    short: 'Bars',
-    eventBonus: 'Minimum of 2 bar changes',
-    groups: {
-      1: 'Mounts',
-      2: 'Casts/Counterswings',
-      3: 'Underswings/Clear Hips',
-      4: 'Giant Swings Backward',
-      5: 'Giant Swings/Circles Fwd.',
-      6: 'Stalder Circles',
-      7: 'Circle Swings/Hechts',
-      8: 'Dismounts',
-    },
-    condensed: { I: [1, 8], II: [2], III: [3, 6, 7], IV: [4, 5] },
-  },
-  beam: {
-    label: 'Balance Beam',
-    short: 'Beam',
-    eventBonus: 'Acro series with 2 connected flight elements on beam',
-    groups: {
-      1: 'Mounts',
-      2: 'Leaps/Jumps/Hops',
-      3: 'Turns',
-      4: 'Waves',
-      5: 'Holds/Stands',
-      6: 'Rolls',
-      7: 'Walkovers/Cartwheels etc.',
-      8: 'Saltos',
-      9: 'Dismounts',
-    },
-    condensed: { I: [1, 9], II: [2, 3], III: [4, 5, 6], IV: [7, 8] },
-  },
-  floor: {
+  fx: {
     label: 'Floor Exercise',
     short: 'Floor',
-    eventBonus: 'Acro pass with min. of 2 connected saltos (direct or indirect)',
     groups: {
-      1: 'Leaps/Jumps/Hops',
-      2: 'Turns',
-      3: 'Handstands',
-      4: 'Rolls',
-      5: 'Walkovers/Cartwheels etc.',
-      6: 'Saltos Forward',
-      7: 'Saltos Sideward/Arabians',
-      8: 'Saltos Backward',
+      1: 'Non acrobatic elements',
+      2: 'Forward acrobatic elements',
+      3: 'Backward acrobatic elements',
+      4: 'Single saltos with at least one twist',
     },
-    condensed: { I: [1, 2], II: [3, 4, 5], III: [6, 7], IV: [8] },
+  },
+  ph: {
+    label: 'Pommel Horse',
+    short: 'Pommel',
+    groups: {
+      1: 'Single leg swings and scissors',
+      2: 'Circles, kehrs, russians, and flops',
+      3: 'Travels',
+      4: 'Dismounts',
+    },
+  },
+  sr: {
+    label: 'Still Rings',
+    short: 'Rings',
+    groups: { 1: 'Kips and swings', 2: 'Strength', 3: 'Swing to strength', 4: 'Dismounts' },
+  },
+  vt: { label: 'Vault', short: 'Vault' },
+  pb: {
+    label: 'Parallel Bars',
+    short: 'P-Bars',
+    groups: { 1: 'Upper arm', 2: 'Support', 3: 'Basket and long hang swings', 4: 'Dismounts' },
+  },
+  hb: {
+    label: 'High Bar',
+    short: 'High Bar',
+    groups: { 1: 'Long hang', 2: 'Flight', 3: 'In bar', 4: 'Dismounts' },
   },
 };
 
+// Bonus and requirement options for each event and level. `kind`:
+//   check    one-time bonus when ticked (value) or, for `deduction`, a
+//            requirement whose absence costs the value
+//   count    number of times a bonus is earned (value each, max `max`)
+//   mushroom Pommel Horse mushroom bonus, 0.0-1.0
+//   stick    stuck dismount bonus (value depends on level and dismount)
+export function eventOptions(event, level) {
+  const o = [];
+  const stick = { id: 'stick', kind: 'stick', label: 'Stuck dismount', help: stickHelp(level) };
+  if (event === 'fx') {
+    o.push({ id: 'conn1', kind: 'count', value: 0.1, max: 5, label: 'D or higher + B/C connection', help: '+0.1 each' });
+    o.push({ id: 'conn2', kind: 'count', value: 0.2, max: 5, label: 'D or higher + D or higher connection', help: '+0.2 each' });
+    if (level === 'adv') {
+      o.push({ id: 'dblDismount', kind: 'check', value: 0.1, label: 'Double flipping dismount', help: '+0.1' });
+      o.push({ id: 'dblFlip', kind: 'check', value: 0.3, deduction: true, label: 'Routine includes a double flip', help: 'Required: -0.3 neutral deduction if missing' });
+    }
+    o.push(stick);
+  }
+  if (event === 'ph' && level === 'dev') {
+    o.push({ id: 'mushroom', kind: 'mushroom', label: 'Mushroom bonus', help: '+0.1 per circle, +0.2 per other skill; top 5 count, max +1.0' });
+  }
+  if (event === 'sr') {
+    o.push({ id: 'strength', kind: 'check', value: 0.3, label: 'C or higher strength skill', help: 'One-time +0.3' });
+    if (level === 'adv') {
+      o.push({ id: 'swingHs', kind: 'check', value: 0.3, deduction: true, label: 'Routine includes a swing to handstand', help: 'Required: -0.3 neutral deduction if missing' });
+    }
+    o.push(stick);
+  }
+  if (event === 'pb') o.push(stick);
+  if (event === 'hb') {
+    o.push({ id: 'connCC', kind: 'count', value: 0.1, max: 5, label: 'C + C connection', help: 'Flight to flight, or in bar to flight / flight to in bar with no intermediate swing: +0.1 each' });
+    o.push(stick);
+  }
+  return o;
+}
+
+function stickHelp(level) {
+  return level === 'adv' ? '+0.1 for a B dismount, +0.2 for C or higher' : '+0.1';
+}
+
 // Avoid floating point noise (0.1 + 0.2 etc.).
 export const round1 = (n) => Math.round(n * 10) / 10;
+export const fmt = (n) => Number(n || 0).toFixed(1);
 
 export function letterValue(letter) {
   return LETTER_VALUES[String(letter || '').toUpperCase()] ?? 0;
 }
 
-export function condensedGroupOf(event, eg) {
-  const { condensed } = APPARATUS[event];
-  const n = Number(eg);
-  return Object.keys(condensed).find((k) => condensed[k].includes(n)) ?? null;
-}
-
 const isFilled = (s) => !!(s && (String(s.name || '').trim() || s.letter));
 
-// "Clear hip", "clearhip" and "Clear-Hip" are the same skill.
+// "Back giant", "backgiant" and "Back-Giant" are the same skill.
 export const skillKey = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+// Element group bonus for one group, from the highest-value counting skill in it.
+function groupBonus(level, event, eg, value) {
+  if (level === 'dev') return 0.5;
+  if (eg === 1) return 0.5;
+  if (level === 'int') return value >= 0.2 ? 0.5 : 0.3;
+  // Advanced: the dismount group is worth the dismount's value (max 0.5),
+  // except on floor, which has no dismount group.
+  if (eg === 4 && event !== 'fx') return Math.min(value, 0.5);
+  return value >= 0.4 ? 0.5 : value >= 0.3 ? 0.4 : 0.3;
+}
+
 /**
- * Score a bars/beam/floor routine.
+ * Score one routine (floor, pommel, rings, p-bars or high bar).
  * skills: the whole routine in order, [{ name, letter, eg }] (blank rows allowed).
  *   - Each skill counts once: a later skill with the same name (ignoring case,
  *     spaces and punctuation) is a repeat and doesn't count.
- *   - The MAX_SKILLS highest-value non-repeat skills count (ties: earlier wins).
- *   - A non-counting skill can still earn an element group bonus for a
- *     condensed group the counting skills miss (no difficulty).
- * eventBonus: true if the apparatus-specific bonus requirement was performed.
+ *   - The level's highest-value skills count (6 Developmental, 8 otherwise),
+ *     at most 4 from one element group. Ties: the earlier skill wins.
+ * options: { [optionId]: true | number } for the event's bonus options.
  *
  * Returns:
- *   items      one entry per input row: { ...row, idx, status } where status is
- *              'blank' | 'counting' | 'noncounting' | 'repeat' (repeats have repeatOf)
- *   rows       counting skills in routine order (at most MAX_SKILLS)
- *   extraRows  non-counting skills that earned element group credit
+ *   items   one entry per input row with status 'blank' | 'counting' |
+ *           'noncounting' | 'repeat' (repeatOf) and, for non-counting skills,
+ *           reason 'top' | 'eg' (over the 4-per-group limit)
+ *   rows    counting skills in routine order
  *   and totals.
  */
-export function scoreRoutine(event, skills = [], { eventBonus = false } = {}) {
+export function scoreRoutine(event, level, skills = [], options = {}) {
+  const L = LEVELS[level] || LEVELS.int;
   const items = skills.map((s, idx) => ({
     idx,
     name: String(s?.name || '').trim(),
     letter: s?.letter || '',
     value: letterValue(s?.letter),
     eg: s?.eg ? Number(s.eg) : null,
-    condensed: s?.eg ? condensedGroupOf(event, s.eg) : null,
     bonus: 0,
     status: isFilled(s) ? null : 'blank',
   }));
@@ -125,77 +181,135 @@ export function scoreRoutine(event, skills = [], { eventBonus = false } = {}) {
     } else if (key) firstSeen.set(key, it.idx);
   }
 
+  const perGroup = {};
+  let counted = 0;
   const candidates = items.filter((it) => !it.status);
-  const counting = new Set(
-    [...candidates]
-      .sort((a, b) => b.value - a.value || a.idx - b.idx)
-      .slice(0, MAX_SKILLS)
-      .map((it) => it.idx)
-  );
-  for (const it of candidates) it.status = counting.has(it.idx) ? 'counting' : 'noncounting';
+  for (const it of [...candidates].sort((a, b) => b.value - a.value || a.idx - b.idx)) {
+    if (it.eg && (perGroup[it.eg] || 0) >= MAX_PER_EG) {
+      it.status = 'noncounting';
+      it.reason = 'eg';
+    } else if (counted >= L.maxSkills) {
+      it.status = 'noncounting';
+      it.reason = 'top';
+    } else {
+      it.status = 'counting';
+      counted++;
+      if (it.eg) perGroup[it.eg] = (perGroup[it.eg] || 0) + 1;
+    }
+  }
 
   const rows = items.filter((it) => it.status === 'counting');
-  const nonCounting = items.filter((it) => it.status === 'noncounting');
 
-  // One +0.3 per condensed group, credited to the first qualifying skill —
-  // counting skills first, then non-counting skills for any group still missing.
-  const earned = new Set();
-  const credit = (list) => {
-    const got = [];
-    for (const r of list) {
-      if (r.condensed && r.value >= EG_BONUS_MIN_VALUE && !earned.has(r.condensed)) {
-        earned.add(r.condensed);
-        r.bonus = EG_BONUS;
-        got.push(r);
-      }
-    }
-    return got;
-  };
-  credit(rows);
-  const extraRows = credit(nonCounting);
+  // Each element group's bonus goes to its highest-value counting skill
+  // (the earliest one on a tie).
+  const egBonus = {};
+  for (const g of [1, 2, 3, 4]) {
+    const best = rows
+      .filter((r) => r.eg === g && r.letter)
+      .sort((a, b) => b.value - a.value || a.idx - b.idx)[0];
+    if (!best) continue;
+    best.bonus = groupBonus(level, event, g, best.value);
+    egBonus[g] = best.bonus;
+  }
+  let egTotal = Object.values(egBonus).reduce((t, b) => t + b, 0);
+  if (level === 'dev') egTotal = Math.min(egTotal, 1.5); // only 3 groups count
+  egTotal = round1(egTotal);
 
   const difficulty = round1(rows.reduce((t, r) => t + r.value, 0));
-  const egTotal = round1(earned.size * EG_BONUS);
-  const eventBonusTotal = eventBonus ? EVENT_BONUS : 0;
+
+  // The dismount: for stick bonus on Advanced, the highest-value counting
+  // dismount (group IV), or on floor the last counting skill.
+  const dismount =
+    event === 'fx'
+      ? rows[rows.length - 1]
+      : rows.filter((r) => r.eg === 4).sort((a, b) => b.value - a.value)[0];
+
+  let bonus = 0;
+  let deductions = 0;
+  const optionValues = {};
+  for (const o of eventOptions(event, level)) {
+    const v = options?.[o.id];
+    let got = 0;
+    if (o.kind === 'check' && o.deduction) {
+      if (!v) deductions += o.value;
+      continue;
+    }
+    if (o.kind === 'check' && v) got = o.value;
+    if (o.kind === 'count') got = Math.min(Math.max(0, Number(v) || 0), o.max) * o.value;
+    if (o.kind === 'mushroom') got = Math.min(Math.max(0, Number(v) || 0), 1);
+    if (o.kind === 'stick' && v) got = stickValue(level, dismount);
+    optionValues[o.id] = round1(got);
+    bonus += got;
+  }
+  bonus = round1(bonus);
+  deductions = round1(deductions);
+
   const shortBy = Math.max(0, MIN_SKILLS - rows.length);
-  const startValue = rows.length
-    ? round1(EXECUTION + difficulty + egTotal + eventBonusTotal - shortBy)
-    : 0;
+  const shortDeduction = round1(shortBy * L.shortDeduction);
+  const raw = round1(EXECUTION + difficulty + egTotal + bonus);
+  const capped = L.cap != null && raw > L.cap;
+  const startValue = rows.length ? round1((capped ? L.cap : raw) - shortDeduction) : 0;
 
   return {
     items,
     rows,
-    extraRows,
     difficulty,
+    egBonus,
     egTotal,
-    eventBonus: eventBonusTotal,
-    earnedGroups: [...earned],
+    bonus,
+    optionValues,
+    dismount,
     shortBy,
+    shortDeduction,
+    raw,
+    capped,
+    cap: L.cap,
     startValue,
+    deductions: rows.length ? deductions : 0,
+    afterDeductions: rows.length ? round1(startValue - deductions) : 0,
   };
 }
 
-export function findVault(name) {
-  return VAULTS.find((v) => v.name === name) ?? null;
+function stickValue(level, dismount) {
+  const L = LEVELS[level];
+  if (L.stick != null) return L.stick;
+  if (!dismount) return 0;
+  return dismount.value >= 0.3 ? 0.2 : dismount.value >= 0.2 ? 0.1 : 0;
 }
 
-export function scoreVault(name) {
-  const v = findVault(name);
-  return v ? { ...v, startValue: round1(v.dv + EXECUTION) } : null;
+export function findVault(id) {
+  return VAULTS.find((v) => v.id === String(id)) ?? null;
+}
+
+// Stuck vault bonus. Developmental: +0.1 (flipping vaults are banned).
+// Intermediate: +0.1 non-flipping, +0.2 flipping. Advanced: +0.2 flipping only.
+export function vaultStickValue(level, v) {
+  if (!v) return 0;
+  if (level === 'dev') return 0.1;
+  if (level === 'int') return v.flipping ? 0.2 : 0.1;
+  return v.flipping ? 0.2 : 0;
+}
+
+export function scoreVault(level, id, { stick = false } = {}) {
+  const v = findVault(id);
+  if (!v) return null;
+  const L = LEVELS[level] || LEVELS.int;
+  const dv = level === 'adv' ? v.adv : v.value;
+  if (level === 'dev' && v.flipping) {
+    return { ...v, dv, stick: 0, banned: true, capped: false, startValue: 0 };
+  }
+  const stickBonus = stick ? vaultStickValue(level, v) : 0;
+  const raw = round1(EXECUTION + dv + stickBonus);
+  const capped = L.cap != null && raw > L.cap;
+  return { ...v, dv, stick: stickBonus, banned: false, raw, capped, startValue: capped ? L.cap : raw };
 }
 
 export function scoreAthlete(athlete) {
-  const vault = scoreVault(athlete.vault);
+  const level = LEVELS[athlete.level] ? athlete.level : 'int';
+  const vault = scoreVault(level, athlete.vault, { stick: !!athlete.options?.vt?.stick });
   const events = Object.fromEntries(
-    EVENTS.map((e) => [
-      e,
-      scoreRoutine(e, athlete.routines?.[e] || [], { eventBonus: !!athlete.eventBonus?.[e] }),
-    ])
+    EVENTS.map((e) => [e, scoreRoutine(e, level, athlete.routines?.[e] || [], athlete.options?.[e] || {})])
   );
-  const allAround = round1(
-    (vault?.startValue || 0) + EVENTS.reduce((t, e) => t + events[e].startValue, 0)
-  );
-  return { vault, events, allAround };
+  const allAround = round1((vault?.startValue || 0) + EVENTS.reduce((t, e) => t + events[e].startValue, 0));
+  return { level, vault, events, allAround };
 }
-
-export const fmt = (n) => Number(n || 0).toFixed(1);
