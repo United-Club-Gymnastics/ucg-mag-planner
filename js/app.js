@@ -224,11 +224,12 @@ function vaultOptions(current, level) {
     Object.entries(groups)
       .map(
         ([eg, list]) =>
-          `<optgroup label="Element group ${esc(eg)}">${list
+          `<optgroup label="${eg ? `WG element group ${esc(eg)}` : 'UCG Code of Points'}">${list
             .map((v) => {
               const banned = level === 'dev' && v.flipping;
               const dv = level === 'adv' ? v.adv : v.value;
-              return `<option value="${esc(v.id)}"${v.id === String(current) ? ' selected' : ''}>${esc(v.id)} · ${esc(v.name)} (${banned ? 'not allowed' : fmt(dv)})</option>`;
+              const name = `${v.src === 'WG' ? `${v.id} · ` : ''}${v.name}${v.eponym ? ` (${v.eponym})` : ''}`;
+              return `<option value="${esc(v.id)}"${v.id === String(current) ? ' selected' : ''}>${esc(name)} — ${banned ? 'not allowed' : fmt(dv)}</option>`;
             })
             .join('')}</optgroup>`
       )
@@ -768,8 +769,8 @@ function updateComputed() {
   // Vault
   const v = score.vault;
   $('#vault-info').innerHTML = v
-    ? `<div><dt>Element group</dt><dd>${esc(v.eg)}</dd></div>
-       <div><dt>VT #</dt><dd>${esc(v.id)}</dd></div>
+    ? `<div><dt>Source</dt><dd><span class="src-badge ${v.src.toLowerCase()}">${v.src}</span></dd></div>
+       ${v.src === 'WG' ? `<div><dt>Element group</dt><dd>${esc(v.eg)}</dd></div><div><dt>VT #</dt><dd>${esc(v.id)}</dd></div>` : ''}
        <div><dt>D score</dt><dd>${fmt(v.dv)}</dd></div>`
     : '';
   const vNote = $('#vault-note');

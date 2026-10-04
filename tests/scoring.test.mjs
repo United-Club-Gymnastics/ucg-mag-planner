@@ -151,13 +151,16 @@ test('mushroom bonus counts toward the Developmental cap', () => {
   assert.equal(r.startValue, 12.3);
 });
 
-test('vault: Advanced uses its own values; Developmental bans flipping vaults', () => {
+test('vault: WG 2025-2028 values; Advanced uses GymACT values; Developmental bans flipping vaults', () => {
   assert.equal(scoreVault('adv', '202').startValue, 11.4);
-  assert.equal(scoreVault('adv', '105').startValue, 13.6);
-  assert.equal(scoreVault('int', '105').startValue, 12.8);
-  assert.equal(scoreVault('dev', '105').startValue, 0);
-  assert.ok(scoreVault('dev', '105').banned);
-  assert.equal(scoreVault('int', '225').startValue, 13.1); // capped
+  assert.equal(scoreVault('adv', '107').startValue, 13.6); // Cuervo piked: 2.8 WG, 3.6 GymACT
+  assert.equal(scoreVault('int', '107').startValue, 12.8);
+  assert.equal(scoreVault('int', '405').startValue, 13.1); // Yurchenko str. 1/1: 3.6 in 2025-2028, capped
+  assert.equal(scoreVault('adv', '405').startValue, 13.6);
+  assert.equal(scoreVault('dev', '107').startValue, 0);
+  assert.ok(scoreVault('dev', '107').banned);
+  assert.equal(scoreVault('dev', 'UCG-VT-tuck-vault').startValue, 10.2);
+  assert.ok(scoreVault('dev', 'UCG-VT-hecht-backflip').banned);
 });
 
 test('all-around adds vault and the five events', () => {
