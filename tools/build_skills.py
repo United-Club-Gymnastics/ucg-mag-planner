@@ -2,9 +2,9 @@
 (the vault picker) from:
 
   WG skills:  skills_verified.json from the FIG MAG CoP 2025-2028 extractor
-              (Dropbox: Misc/Gymnastics/Reference/gym_skill_extract)
+              (Dropbox: Gymnastics/Reference/gym_skill_extract)
   UCG skills: every skill box in the UCG MAG Code of Points master
-              (Dropbox: Misc/Gymnastics/UCG/Code of Points/MAG/UCG MAG CoP.svg),
+              (repo: C:/dev/ucg-code-of-points/MAG/UCG MAG CoP.svg),
               read with that repo's tools (needs Inkscape, as they do)
 
 Run after the UCG CoP gets new skills (or a new WG CoP is extracted):
@@ -19,9 +19,9 @@ import os
 import re
 import sys
 
-DROPBOX = os.path.expanduser(r"~/Steinsharpe Dropbox/Nate Sharpe/Documents/Misc/Gymnastics")
+DROPBOX = os.path.expanduser(r"~/Steinsharpe Dropbox/Nate Sharpe/Documents/Gymnastics")
 WG_DEFAULT = os.path.join(DROPBOX, "Reference", "gym_skill_extract", "skills_verified.json")
-COP_DEFAULT = os.path.join(DROPBOX, "UCG", "Code of Points")
+COP_DEFAULT = r"C:\dev\ucg-code-of-points"
 OUT = os.path.join(os.path.dirname(__file__), "..", "js", "skills.js")
 VAULT_OUT = os.path.join(os.path.dirname(__file__), "..", "js", "vaults.js")
 
